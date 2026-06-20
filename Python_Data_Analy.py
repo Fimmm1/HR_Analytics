@@ -366,7 +366,7 @@ def gen_pdf(R,sd):
 # ═══════════════════════════════════════════════════════════════
 def get_ai_plan(key,dept,rate,total,fi_text,ctx):
     try:
-        from openai import OpenAI;client=OpenAI(api_key="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")
+        from openai import OpenAI;client=OpenAI(api_key=key)
         prompt=f"""당신은 글로벌 HR 컨설팅 펌의 시니어 HR 전략 컨설턴트입니다.
 반드시 아래 데이터 수치를 근거로만 답변하세요.
 [분석 결과] {ctx}
