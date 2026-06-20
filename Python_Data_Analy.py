@@ -129,67 +129,235 @@ def run_pipeline(eb, sb, tb):
 def gen_pdf(R,sd):
     from fpdf import FPDF;import tempfile,os
     emp=R['emp'];total=len(emp);termed=int(emp['Attrition'].sum());rate=round(termed/total*100,1)
+    avg_rate=R['ds']['rate'].mean()
+    high_depts=R['ds'][R['ds']['rate']>=15].sort_values('rate',ascending=False)
+    fi_src=R['dfi'].get(sd,R['fi']) if sd!='All' else R['fi']
+    top3fi=fi_src.head(3)
+
     def svc(fig,n):
         p=os.path.join(tempfile.gettempdir(),f'{n}.png');fig.savefig(p,dpi=150,bbox_inches='tight',facecolor='white');plt.close(fig);return p
+
+    # 차트 1: 조직별 이탈률
     dd=R['ds'].sort_values('rate',ascending=True)
     f1,ax=plt.subplots(figsize=(10,5));colors=[('#ef4444' if r>=15 else '#f59e0b' if r>=5 else '#22c55e') for r in dd['rate']]
-    ax.barh(dd['DepartmentType'],dd['rate'],color=colors,height=0.6)
+    ax.barh(dd['DepartmentType'],dd['rate'],color=colors,height=0.5)
     for i,(r,t) in enumerate(zip(dd['rate'],dd['total'])):ax.text(r+0.3,i,f'{r}% ({t})',va='center',fontsize=9)
     ax.set_xlabel('Attrition Rate (%)');ax.set_title('Department Attrition Rate',fontweight='bold');plt.tight_layout();c1=svc(f1,'d')
-    fis=R['dfi'].get(sd,R['fi']) if sd!='All' else R['fi'];fiv=fis.sort_values('importance',ascending=True)
-    f2,ax=plt.subplots(figsize=(10,6));ax.barh(fiv['feature'],fiv['importance'],color=plt.cm.viridis(np.linspace(0.3,0.9,len(fiv))),height=0.6)
-    ax.set_title('Feature Importance',fontweight='bold');plt.tight_layout();c2=svc(f2,'f')
+
+    # 차트 2: Feature Importance
+    fiv=fi_src.sort_values('importance',ascending=True)
+    f2,ax=plt.subplots(figsize=(10,6));ax.barh(fiv['feature'],fiv['importance'],color=plt.cm.viridis(np.linspace(0.3,0.9,len(fiv))),height=0.5)
+    ax.set_title('Feature Importance (Random Forest)',fontweight='bold');plt.tight_layout();c2=svc(f2,'f')
+
+    # 차트 3: 연도별 추이
     f3,ax=plt.subplots(figsize=(10,5));ax.bar(R['ydf']['year'],R['ydf']['exits'],color='#ef4444',alpha=0.7);ax.plot(R['ydf']['year'],R['ydf']['exits'],'o-',color='#991b1b',lw=2)
     for x,y in zip(R['ydf']['year'],R['ydf']['exits']):ax.text(x,y+3,str(y),ha='center',fontweight='bold')
-    ax.set_title('Yearly Exits',fontweight='bold');plt.tight_layout();c3=svc(f3,'y')
+    ax.set_title('Yearly Exit Count',fontweight='bold');plt.tight_layout();c3=svc(f3,'y')
+
+    # 차트 4: 연도별 이탈률
+    f3b,ax=plt.subplots(figsize=(10,5));ax.plot(R['ydf']['year'],R['ydf']['rate'],'o-',color='#ef4444',lw=2,markersize=8,markerfacecolor='white',markeredgewidth=2)
+    ax.fill_between(R['ydf']['year'],R['ydf']['rate'],alpha=0.1,color='#ef4444')
+    for x,y in zip(R['ydf']['year'],R['ydf']['rate']):ax.text(x,y+0.3,f'{y}%',ha='center',fontweight='bold')
+    ax.set_title('Yearly Attrition Rate Trend',fontweight='bold');plt.tight_layout();c3b=svc(f3b,'yr')
+
+    # 차트 5: 위험도 분포
     m=R['merged'] if sd=='All' else R['merged'][R['merged']['DepartmentType']==sd]
     f4,ax=plt.subplots(figsize=(10,5));ax.hist(m['Risk_Score'],bins=20,color='#3b82f6',alpha=0.7,edgecolor='white')
     ax.axvline(60,color='#ef4444',ls='--',lw=2,label='High(60)');ax.axvline(30,color='#f59e0b',ls='--',lw=2,label='Mid(30)')
     ax.set_title('Risk Score Distribution',fontweight='bold');ax.legend();plt.tight_layout();c4=svc(f4,'r')
+
+    # 차트 6: 서베이 비교
+    sc=R['scomp'];sc.index=['Active','Terminated']
+    f5,ax=plt.subplots(figsize=(10,5));x=np.arange(3);w=0.3
+    ax.bar(x-w/2,sc.iloc[0],w,label='Active',color='#3b82f6');ax.bar(x+w/2,sc.iloc[1],w,label='Terminated',color='#ef4444')
+    ax.set_xticks(x);ax.set_xticklabels(['Engagement','Satisfaction','Work-Life Balance'])
+    ax.set_ylabel('Score');ax.legend();ax.set_ylim(2.0,4.0);ax.set_title('Survey: Active vs Terminated',fontweight='bold')
+    plt.tight_layout();c5=svc(f5,'sv')
+
     class PDF(FPDF):
         def header(self):
-            self.set_font('Helvetica','B',10);self.set_text_color(100,100,100);self.cell(0,8,'HR Attrition Analysis Report | Confidential',align='R',new_x="LMARGIN",new_y="NEXT");self.line(10,self.get_y(),200,self.get_y());self.ln(3)
+            self.set_font('Helvetica','B',9);self.set_text_color(120,120,120)
+            self.cell(0,8,'HR Attrition Analysis Report  |  Confidential',align='R',new_x="LMARGIN",new_y="NEXT")
+            self.set_draw_color(200,200,200);self.line(10,self.get_y(),200,self.get_y());self.ln(3)
         def footer(self):
-            self.set_y(-15);self.set_font('Helvetica','I',8);self.set_text_color(150,150,150);self.cell(0,10,f'Page {self.page_no()}',align='C')
-        def stitle(self,t):self.set_font('Helvetica','B',13);self.set_text_color(30,30,30);self.cell(0,10,t,new_x="LMARGIN",new_y="NEXT");self.ln(2)
-        def stitle2(self,t):self.set_font('Helvetica','B',10);self.set_text_color(60,60,60);self.cell(0,7,t,new_x="LMARGIN",new_y="NEXT");self.ln(1)
-        def body(self,t):self.set_font('Helvetica','',9);self.set_text_color(50,50,50);self.multi_cell(0,5,t);self.ln(2)
+            self.set_y(-15);self.set_font('Helvetica','I',8);self.set_text_color(150,150,150)
+            self.cell(0,10,f'Page {self.page_no()}  |  Generated by HR Attrition Analytics',align='C')
+        def s1(self,t):self.set_font('Helvetica','B',14);self.set_text_color(25,25,25);self.cell(0,10,t,new_x="LMARGIN",new_y="NEXT");self.ln(2)
+        def s2(self,t):self.set_font('Helvetica','B',11);self.set_text_color(50,50,50);self.cell(0,7,t,new_x="LMARGIN",new_y="NEXT");self.ln(1)
+        def bd(self,t):self.set_font('Helvetica','',9);self.set_text_color(50,50,50);self.multi_cell(0,5,t);self.ln(2)
+        def insight(self,t):
+            self.set_fill_color(240,244,255);self.set_draw_color(59,130,246)
+            self.set_font('Helvetica','',9);self.set_text_color(30,30,30)
+            x=self.get_x();y=self.get_y();self.rect(x,y,190,self.get_string_width(t)/180*5+12)
+            self.set_xy(x+2,y+2);self.multi_cell(186,5,f'[Insight] {t}');self.ln(4)
+        def warning(self,t):
+            self.set_fill_color(254,243,199);self.set_draw_color(245,158,11)
+            self.set_font('Helvetica','B',9);self.set_text_color(120,60,0)
+            self.multi_cell(0,5,f'[Warning] {t}');self.ln(3)
+
     pdf=PDF();pdf.set_auto_page_break(auto=True,margin=20)
-    pdf.add_page();pdf.ln(40);pdf.set_font('Helvetica','B',28);pdf.set_text_color(30,30,30)
-    pdf.cell(0,15,'HR Attrition',align='C',new_x="LMARGIN",new_y="NEXT");pdf.cell(0,15,'Analysis Report',align='C',new_x="LMARGIN",new_y="NEXT")
-    pdf.ln(10);pdf.set_font('Helvetica','',12);pdf.set_text_color(100,100,100)
-    sc=sd if sd!='All' else 'All Departments'
-    pdf.cell(0,8,f'Scope: {sc}',align='C',new_x="LMARGIN",new_y="NEXT");pdf.cell(0,8,f'Total: {total:,} | Rate: {rate}%',align='C',new_x="LMARGIN",new_y="NEXT")
-    pdf.ln(20);pdf.set_font('Helvetica','',10);pdf.cell(0,8,'Sogang Univ. AI/SW | Kim Hyuntae (A74032)',align='C',new_x="LMARGIN",new_y="NEXT")
-    pdf.add_page();pdf.stitle('1. Executive Summary');pdf.body(f'Total {total:,} employees, {termed} terminated ({rate}%). ROC-AUC: {R["auc"]:.4f}')
-    pdf.stitle2('High-Risk Departments')
-    for _,r in R['ds'][R['ds']['rate']>=10].sort_values('rate',ascending=False).iterrows():
-        lv='CRITICAL' if r['rate']>=15 else 'WARNING';pdf.body(f"  [{lv}] {r['DepartmentType']}: {r['rate']}% ({int(r['terminated'])}/{r['total']})")
-    pdf.add_page();pdf.stitle('2. Department Analysis');pdf.image(c1,x=10,w=190);pdf.ln(5)
-    pdf.set_font('Helvetica','B',9);pdf.cell(55,7,'Department',border=1);pdf.cell(25,7,'Total',border=1,align='C');pdf.cell(25,7,'Term',border=1,align='C');pdf.cell(25,7,'Rate%',border=1,align='C');pdf.cell(30,7,'Risk',border=1,align='C');pdf.ln()
-    pdf.set_font('Helvetica','',9)
+
+    # ─── 표지 ───
+    pdf.add_page();pdf.ln(50)
+    pdf.set_font('Helvetica','B',32);pdf.set_text_color(25,25,25)
+    pdf.cell(0,15,'HR Attrition',align='C',new_x="LMARGIN",new_y="NEXT")
+    pdf.cell(0,15,'Analysis Report',align='C',new_x="LMARGIN",new_y="NEXT")
+    pdf.ln(8);pdf.set_draw_color(59,130,246);pdf.set_line_width(0.8);pdf.line(70,pdf.get_y(),140,pdf.get_y());pdf.ln(8)
+    pdf.set_font('Helvetica','',12);pdf.set_text_color(100,100,100)
+    scope=sd if sd!='All' else 'All Departments'
+    pdf.cell(0,7,f'Analysis Scope: {scope}',align='C',new_x="LMARGIN",new_y="NEXT")
+    pdf.cell(0,7,f'Total Employees: {total:,}  |  Attrition Rate: {rate}%',align='C',new_x="LMARGIN",new_y="NEXT")
+    pdf.cell(0,7,f'Model Performance: ROC-AUC {R["auc"]:.4f}',align='C',new_x="LMARGIN",new_y="NEXT")
+    pdf.ln(30)
+    pdf.set_font('Helvetica','',10)
+    pdf.cell(0,7,'Sogang University AI/SW Graduate School',align='C',new_x="LMARGIN",new_y="NEXT")
+    pdf.cell(0,7,'Kim Hyuntae (A74032)',align='C',new_x="LMARGIN",new_y="NEXT")
+
+    # ─── 1. Executive Summary ───
+    pdf.add_page();pdf.s1('1. Executive Summary')
+    pdf.bd(f'This report presents the results of an employee attrition analysis conducted on {total:,} employee records. Using Random Forest machine learning and SHAP explainability framework, we identified key attrition drivers, high-risk departments, and individual employee risk scores to enable proactive retention strategies.')
+    pdf.s2('Key Performance Indicators')
+    pdf.set_font('Helvetica','B',9)
+    for h in ['Metric','Value','Assessment']:pdf.cell(63,7,h,border=1,align='C')
+    pdf.ln();pdf.set_font('Helvetica','',9)
+    for met,val,ass in [('Total Employees',f'{total:,}','-'),('Terminated',f'{termed}','-'),('Attrition Rate',f'{rate}%','CRITICAL' if rate>=15 else 'WARNING' if rate>=10 else 'NORMAL'),('ROC-AUC Score',f'{R["auc"]:.4f}','Excellent' if R["auc"]>=0.85 else 'Good' if R["auc"]>=0.75 else 'Fair'),('High-Risk Employees',f'{len(m[m["Risk_Score"]>=60])}','Immediate attention needed')]:
+        pdf.cell(63,6,met,border=1);pdf.cell(63,6,val,border=1,align='C');pdf.cell(63,6,ass,border=1,align='C');pdf.ln()
+    pdf.ln(3)
+    if len(high_depts)>0:
+        pdf.warning(f'High-risk departments identified: {", ".join([f"{r.DepartmentType}({r.rate}%)" for _,r in high_depts.iterrows()])}. These departments significantly exceed the company average of {avg_rate:.1f}% and require immediate retention intervention.')
+    pdf.s2('Top 3 Attrition Drivers')
+    pdf.bd(f'The Random Forest model identified the following as the most influential factors in predicting employee attrition:\n  1. {top3fi.iloc[0]["feature"]} (Importance: {top3fi.iloc[0]["importance"]:.1%})\n  2. {top3fi.iloc[1]["feature"]} (Importance: {top3fi.iloc[1]["importance"]:.1%})\n  3. {top3fi.iloc[2]["feature"]} (Importance: {top3fi.iloc[2]["importance"]:.1%})\nThese three factors account for {top3fi["importance"].sum():.1%} of the model\'s predictive power.')
+
+    # ─── 2. Department Analysis ───
+    pdf.add_page();pdf.s1('2. Department Attrition Analysis')
+    pdf.bd('The following chart and table show attrition rates by department. Departments are color-coded: Red (>=15%, Critical), Yellow (5-15%, Warning), Green (<5%, Stable).')
+    pdf.image(c1,x=10,w=190);pdf.ln(3)
+    pdf.set_font('Helvetica','B',9)
+    for h in ['Department','Total','Terminated','Rate (%)','Risk Level']:pdf.cell(38,7,h,border=1,align='C')
+    pdf.ln();pdf.set_font('Helvetica','',9)
     for _,r in R['ds'].sort_values('rate',ascending=False).iterrows():
-        lv='HIGH' if r['rate']>=15 else 'MID' if r['rate']>=5 else 'LOW'
-        pdf.cell(55,6,str(r['DepartmentType']),border=1);pdf.cell(25,6,str(r['total']),border=1,align='C');pdf.cell(25,6,str(int(r['terminated'])),border=1,align='C');pdf.cell(25,6,str(r['rate']),border=1,align='C');pdf.cell(30,6,lv,border=1,align='C');pdf.ln()
-    pdf.add_page();pdf.stitle('3. Key Attrition Drivers');pdf.image(c2,x=10,w=190);pdf.ln(5)
-    pdf.add_page();pdf.stitle('4. Yearly Trend');pdf.image(c3,x=10,w=190)
-    pdf.add_page();pdf.stitle('5. Risk Scoring');pdf.image(c4,x=10,w=190);pdf.ln(5)
-    pdf.stitle2('Top 20 High-Risk');pdf.set_font('Helvetica','B',8)
-    pdf.cell(15,6,'ID',border=1);pdf.cell(45,6,'Department',border=1);pdf.cell(45,6,'Title',border=1);pdf.cell(20,6,'Risk%',border=1,align='C');pdf.cell(20,6,'Tenure',border=1,align='C');pdf.cell(25,6,'Perf',border=1,align='C');pdf.ln()
-    pdf.set_font('Helvetica','',7)
+        lv='CRITICAL' if r['rate']>=15 else 'WARNING' if r['rate']>=5 else 'STABLE'
+        pdf.cell(38,6,str(r['DepartmentType'])[:18],border=1);pdf.cell(38,6,str(r['total']),border=1,align='C')
+        pdf.cell(38,6,str(int(r['terminated'])),border=1,align='C');pdf.cell(38,6,str(r['rate']),border=1,align='C');pdf.cell(38,6,lv,border=1,align='C');pdf.ln()
+    pdf.ln(3)
+    low_depts=R['ds'][R['ds']['rate']<5]['DepartmentType'].tolist()
+    if high_depts is not None and len(high_depts)>0:
+        pdf.bd(f'[Analysis] {", ".join(high_depts["DepartmentType"].tolist())} show attrition rates significantly above company average ({avg_rate:.1f}%). Immediate investigation into root causes is recommended, with focus on compensation competitiveness, workload distribution, and career development opportunities.')
+    if low_depts:
+        pdf.bd(f'[Best Practice] {", ".join(low_depts)} maintain attrition below 5%. Success factors from these departments should be analyzed and benchmarked for cross-departmental application.')
+
+    # ─── 3. Attrition Drivers ───
+    pdf.add_page();pdf.s1('3. Key Attrition Drivers (Feature Importance)')
+    pdf.bd('Feature Importance measures how much each variable contributes to the model\'s ability to predict attrition. Higher values indicate stronger predictive power. Note: this shows WHICH factors matter, not HOW they affect attrition (see SHAP analysis for directionality).')
+    pdf.image(c2,x=10,w=190);pdf.ln(3)
+    pdf.s2('Top 5 Features - Detailed Interpretation')
+    pdf.set_font('Helvetica','B',8)
+    pdf.cell(10,7,'#',border=1,align='C');pdf.cell(45,7,'Feature',border=1);pdf.cell(25,7,'Score',border=1,align='C');pdf.cell(110,7,'Business Interpretation',border=1);pdf.ln()
+    pdf.set_font('Helvetica','',8)
+    interps={'Training Cost':'Training investment level strongly correlates with retention. Under-invested employees may feel undervalued.','Location':'Geographic factors create significant attrition variance. Certain sites may have local market or commute issues.','Title':'Specific job roles show inherently higher turnover, reflecting market demand and career path limitations.','Engagement':'Lower engagement scores serve as leading indicators of impending departure.','Satisfaction':'Job satisfaction directly impacts the decision to stay or leave the organization.','Work-Life Balance':'Poor work-life balance is a key push factor driving employees to seek alternatives.','Employee Rating':'Performance evaluation outcomes influence career trajectory decisions.','Training Duration':'Duration of training programs reflects development investment depth.','Department':'Organizational culture and management practices vary by department.','Performance':'Performance assessment results affect both voluntary and involuntary turnover.','Employee Type':'Employment classification (FT/PT/Contract) affects job stability expectations.','Gender':'Gender-based patterns may indicate equity issues requiring investigation.'}
+    for i,(_,r) in enumerate(fi_src.head(5).iterrows()):
+        pdf.cell(10,12,str(i+1),border=1,align='C');pdf.cell(45,12,str(r['feature']),border=1)
+        pdf.cell(25,12,f'{r["importance"]:.4f}',border=1,align='C')
+        interp=interps.get(r['feature'],'Contributing factor to attrition prediction.')
+        # Handle long text
+        pdf.cell(110,12,interp[:55],border=1);pdf.ln()
+    pdf.ln(3)
+    pdf.bd(f'[Key Finding] The top 3 features ({", ".join(top3fi["feature"].tolist())}) account for {top3fi["importance"].sum():.1%} of total predictive power. HR interventions should prioritize these areas for maximum retention impact.')
+
+    # ─── 4. Yearly Trend ───
+    pdf.add_page();pdf.s1('4. Yearly Attrition Trend')
+    pdf.bd('Understanding temporal patterns helps identify whether attrition is a structural issue or linked to specific organizational events.')
+    pdf.s2('4-1. Annual Exit Count')
+    pdf.image(c3,x=10,w=190);pdf.ln(3)
+    pdf.s2('4-2. Annual Attrition Rate')
+    pdf.image(c3b,x=10,w=190);pdf.ln(3)
+    pdf.set_font('Helvetica','B',9)
+    for h in ['Year','Exits','Est. Active','Rate (%)']:pdf.cell(47,7,h,border=1,align='C')
+    pdf.ln();pdf.set_font('Helvetica','',9)
+    for _,r in R['ydf'].iterrows():
+        pdf.cell(47,6,str(int(r['year'])),border=1,align='C');pdf.cell(47,6,str(r['exits']),border=1,align='C')
+        pdf.cell(47,6,str(r['active']),border=1,align='C');pdf.cell(47,6,str(r['rate']),border=1,align='C');pdf.ln()
+    pdf.ln(3)
+    if len(R['ydf'])>=2:
+        first=R['ydf'].iloc[0];last=R['ydf'].iloc[-1]
+        trend='increasing' if last['rate']>first['rate'] else 'decreasing' if last['rate']<first['rate'] else 'stable'
+        pdf.bd(f'[Trend Analysis] Attrition has been {trend} from {first["rate"]}% ({int(first["year"])}) to {last["rate"]}% ({int(last["year"])}). {"An increasing trend warrants investigation into organizational changes, policy shifts, or market conditions during this period." if trend=="increasing" else "The current trajectory should be maintained through continued application of existing retention strategies."}')
+
+    # ─── 5. Survey Analysis ───
+    pdf.add_page();pdf.s1('5. Employee Survey Analysis')
+    pdf.bd('Comparing survey scores between active and terminated employees reveals which engagement dimensions serve as leading indicators of attrition risk.')
+    pdf.image(c5,x=10,w=190);pdf.ln(3)
+    pdf.set_font('Helvetica','B',9)
+    for h in ['Survey Item','Active Avg','Terminated Avg','Difference','Signal']:pdf.cell(38,7,h,border=1,align='C')
+    pdf.ln();pdf.set_font('Helvetica','',9)
+    cols=['Engagement Score','Satisfaction Score','Work-Life Balance Score']
+    short_names=['Engagement','Satisfaction','Work-Life Bal.']
+    for col,sn in zip(cols,short_names):
+        act_v=sc.loc['Active',col];term_v=sc.loc['Terminated',col];diff=term_v-act_v
+        signal='WARNING' if diff<-0.05 else 'MONITOR' if diff<0 else 'OK'
+        pdf.cell(38,6,sn,border=1);pdf.cell(38,6,f'{act_v:.2f}',border=1,align='C')
+        pdf.cell(38,6,f'{term_v:.2f}',border=1,align='C');pdf.cell(38,6,f'{diff:+.2f}',border=1,align='C');pdf.cell(38,6,signal,border=1,align='C');pdf.ln()
+    pdf.ln(3)
+    neg_items=[sn for col,sn in zip(cols,short_names) if sc.loc['Terminated',col]<sc.loc['Active',col]]
+    if neg_items:
+        pdf.bd(f'[Survey Insight] Terminated employees scored lower on: {", ".join(neg_items)}. These items function as early warning signals. HR should implement regular pulse surveys and flag employees/teams showing declining scores in these areas for proactive intervention.')
+
+    # ─── 6. Risk Scoring ───
+    pdf.add_page();pdf.s1('6. Employee Risk Scoring')
+    pdf.bd(f'Each employee was assigned an attrition risk score (0-100) based on Random Forest prediction probability. Scores of 60+ indicate high risk requiring immediate attention, 30-59 indicate medium risk for monitoring, and below 30 indicate low risk.')
+    pdf.image(c4,x=10,w=190);pdf.ln(3)
+    hi=len(m[m['Risk_Score']>=60]);mi=len(m[(m['Risk_Score']>=30)&(m['Risk_Score']<60)]);lo=len(m[m['Risk_Score']<30])
+    pdf.s2('Risk Distribution Summary')
+    pdf.set_font('Helvetica','B',9)
+    for h in ['Risk Level','Criteria','Count','Percentage','Action Required']:pdf.cell(38,7,h,border=1,align='C')
+    pdf.ln();pdf.set_font('Helvetica','',9)
+    ttl=max(len(m),1)
+    for lv,cr,cnt,act in [('HIGH','Score >= 60',hi,'Immediate 1:1 interview'),('MEDIUM','Score 30-59',mi,'Regular monitoring'),('LOW','Score < 30',lo,'Standard management')]:
+        pdf.cell(38,6,lv,border=1,align='C');pdf.cell(38,6,cr,border=1,align='C');pdf.cell(38,6,str(cnt),border=1,align='C')
+        pdf.cell(38,6,f'{cnt/ttl*100:.1f}%',border=1,align='C');pdf.cell(38,6,act,border=1,align='C');pdf.ln()
+    pdf.ln(3)
+    pdf.s2('Top 20 High-Risk Employees')
+    pdf.set_font('Helvetica','B',7)
+    for h in ['ID','Department','Title','Risk%','Tenure','Performance','Rating']:
+        w=27 if h in['Department','Title'] else 22 if h=='Performance' else 17
+        pdf.cell(w,6,h,border=1,align='C')
+    pdf.ln();pdf.set_font('Helvetica','',7)
     for _,r in m.nlargest(20,'Risk_Score').iterrows():
-        pdf.cell(15,5,str(r['EmpID']),border=1);pdf.cell(45,5,str(r['DepartmentType'])[:22],border=1);pdf.cell(45,5,str(r['Title'])[:22],border=1)
-        pdf.cell(20,5,str(r['Risk_Score']),border=1,align='C');pdf.cell(20,5,str(r.get('Tenure_Years','N/A')),border=1,align='C');pdf.cell(25,5,str(r.get('Performance Score','N/A'))[:12],border=1,align='C');pdf.ln()
-    pdf.add_page();pdf.stitle('6. Recommendations')
+        pdf.cell(17,5,str(r['EmpID']),border=1,align='C');pdf.cell(27,5,str(r['DepartmentType'])[:14],border=1)
+        pdf.cell(27,5,str(r['Title'])[:14],border=1);pdf.cell(17,5,str(r['Risk_Score']),border=1,align='C')
+        pdf.cell(17,5,str(r.get('Tenure_Years','N/A')),border=1,align='C')
+        pdf.cell(22,5,str(r.get('Performance Score','N/A'))[:10],border=1,align='C')
+        pdf.cell(17,5,str(r.get('Current Employee Rating','N/A')),border=1,align='C');pdf.ln()
+    pdf.ln(3)
+    if hi>0:
+        pdf.bd(f'[Action Required] {hi} employees are classified as high-risk (score >= 60). Recommended immediate actions: (1) Schedule 1:1 stay interviews within 2 weeks, (2) Review compensation competitiveness for each individual, (3) Assess workload and career development satisfaction, (4) Develop personalized retention plans.')
+
+    # ─── 7. Recommendations ───
+    pdf.add_page();pdf.s1('7. Strategic Recommendations')
+    pdf.bd('Based on the comprehensive analysis above, the following strategic recommendations are organized by department risk level and priority.')
     for _,r in R['ds'].sort_values('rate',ascending=False).iterrows():
         if sd!='All' and r['DepartmentType']!=sd:continue
-        rt=r['rate'];pdf.stitle2(f"{r['DepartmentType']} ({rt}%)")
-        if rt>=15:pdf.body(f"[CRITICAL] 1.Retention packages 2.Stay interviews 3.Compensation review 4.Career roadmap 5.Flexible work\nTarget: {rt}% -> {max(rt-5,5):.0f}%")
-        elif rt>=5:pdf.body(f"[WARNING] 1.Target high-turnover roles 2.Mentoring 3.Engagement surveys\nTarget: below {max(rt-2,3):.0f}%")
-        else:pdf.body("[STABLE] Maintain current policies, benchmark success factors")
-    pdf.ln(10);pdf.set_font('Helvetica','I',8);pdf.set_text_color(130,130,130);pdf.multi_cell(0,4,'Disclaimer: AI-powered decision-support tool. Final decisions require HR professional review.')
-    for f in [c1,c2,c3,c4]:
-        try:import os;os.remove(f)
+        rt=r['rate'];pdf.s2(f'{r["DepartmentType"]} (Attrition: {rt}%)')
+        if rt>=15:
+            pdf.bd(f'Risk Level: CRITICAL\n\nShort-term Actions (0-3 months):\n  1. Deploy emergency retention packages for top {min(int(r["terminated"]),20)} high-risk employees\n  2. Conduct stay interviews with all team members within 30 days\n  3. Review and adjust compensation to match market rates\n\nMid-term Actions (3-12 months):\n  4. Establish clear career progression pathways (e.g., Technician I > II > Manager)\n  5. Implement flexible work arrangements and workload optimization\n  6. Launch mentoring program pairing senior and junior staff\n\nTarget: Reduce attrition from {rt}% to {max(rt-5,5):.0f}% within 12 months\nEstimated savings: {int(r["terminated"])*0.5:.0f} fewer departures = significant recruitment cost reduction')
+        elif rt>=5:
+            pdf.bd(f'Risk Level: WARNING\n\nActions:\n  1. Identify and address specific high-turnover job roles within the department\n  2. Strengthen internal mobility and job rotation programs\n  3. Enhance regular engagement surveys with follow-up action plans\n\nTarget: Maintain attrition below {max(rt-2,3):.0f}% within 12 months')
+        else:
+            pdf.bd(f'Risk Level: STABLE\n\nActions:\n  1. Maintain current HR policies and monitoring cadence\n  2. Document and share retention success factors for cross-department benchmarking\n  3. Continue periodic pulse surveys to detect early warning signs')
+
+    # ─── 8. Methodology ───
+    pdf.add_page();pdf.s1('8. Methodology & Limitations')
+    pdf.s2('Analysis Pipeline')
+    pdf.bd(f'1. Data Integration: 3 CSV tables joined on Employee ID ({total:,} records)\n2. Preprocessing: String normalization, binary encoding, derived features (tenure, age)\n3. Class Imbalance: SMOTE oversampling applied (minority class {termed} -> balanced)\n4. Model: Random Forest Classifier (100 trees, max_depth=10)\n5. Evaluation: ROC-AUC {R["auc"]:.4f}, train/test split 80/20 with stratification\n6. Explainability: SHAP TreeExplainer for feature contribution analysis\n7. Risk Scoring: Model prediction probability scaled to 0-100 for each employee')
+    pdf.s2('Limitations & Considerations')
+    pdf.bd('1. This analysis is based on historical data and statistical patterns. Individual circumstances not captured in the data may influence actual attrition decisions.\n2. SMOTE-generated synthetic samples may introduce slight bias in model evaluation metrics.\n3. Feature Importance shows correlation, not causation. Organizational context is needed for causal interpretation.\n4. Risk scores should be used as decision-support tools, not as deterministic predictions.\n5. Regular model retraining with updated data is recommended to maintain prediction accuracy.')
+
+    # ─── Disclaimer ───
+    pdf.ln(10);pdf.set_font('Helvetica','I',8);pdf.set_text_color(130,130,130)
+    pdf.multi_cell(0,4,'DISCLAIMER: This report is generated by an AI-powered HR analytics system and is intended as a decision-support tool. All recommendations should be reviewed by HR professionals considering organizational context, labor regulations, and individual employee circumstances before implementation. Employee data privacy must be maintained in accordance with applicable data protection regulations.')
+
+    for f in [c1,c2,c3,c3b,c4,c5]:
+        try:os.remove(f)
         except:pass
     return bytes(pdf.output())
 
