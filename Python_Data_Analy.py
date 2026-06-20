@@ -682,7 +682,40 @@ def main():
         st.subheader("📊 CSV 다운로드")
         csv1=R['merged'][['EmpID','DepartmentType','Title','Risk_Score','Risk_Level','Tenure_Years','Performance Score','Current Employee Rating','Attrition']].to_csv(index=False).encode('utf-8-sig')
         st.download_button("⬇️ 직원 위험도 CSV",csv1,"risk_scores.csv","text/csv",use_container_width=True)
-        csv2=R['ds'].to_csv(index=False).encode('utf-8-sig')
-        st.download_button("⬇️ 조직별 통계 CSV",csv2,"dept_stats.csv","text/csv",use_container_width=True)
+        # 조직별 종합 분석 CSV 생성
+        dept_full = R['ds'].copy()
+        merged = R['merged']
+        
+        # 조직별 평균 위험 점수
+        dept_risk = merged.groupby('DepartmentType')['Risk_Score'].agg(['mean','median']).round(1)
+        dept_risk.columns = ['Avg_Risk_Score','Median_Risk_Score']
+        dept_full = dept_full.merge(dept_risk, left_on='DepartmentType', right_index=True, how='left')
+        
+        # 조직별 위험 등급 인원
+        for lv,lo,hi in [('High_Risk_Count',60,101),('Medium_Risk_Count',30,60),('Low_Risk_Count',0,30)]:
+            cnt = merged[(merged['Risk_Score']>=lo)&(merged['Risk_Score']<hi)].groupby('DepartmentType')['EmpID'].count()
+            dept_full = dept_full.merge(cnt.rename(lv), left_on='DepartmentType', right_index=True, how='left')
+        
+        # 조직별 서베이 평균
+        sv = merged.groupby('DepartmentType')[['Engagement Score','Satisfaction Score','Work-Life Balance Score']].mean().round(2)
+        dept_full = dept_full.merge(sv, left_on='DepartmentType', right_index=True, how='left')
+        
+        # 조직별 평균 근속/평가
+        extra = merged.groupby('DepartmentType').agg(
+            Avg_Tenure=('Tenure_Years','mean'),
+            Avg_Rating=('Current Employee Rating','mean'),
+            Avg_Training_Cost=('Training Cost','mean')
+        ).round(1)
+        dept_full = dept_full.merge(extra, left_on='DepartmentType', right_index=True, how='left')
+        
+        # 위험 등급 컬럼
+        dept_full['Risk_Level'] = dept_full['rate'].apply(lambda x: 'CRITICAL' if x>=15 else 'WARNING' if x>=5 else 'STABLE')
+        
+        # 컬럼 순서 정리
+        dept_full = dept_full.rename(columns={'DepartmentType':'Department','total':'Total','terminated':'Terminated','rate':'Attrition_Rate(%)'})
+        dept_full = dept_full.sort_values('Attrition_Rate(%)', ascending=False)
+        
+        csv2 = dept_full.to_csv(index=False).encode('utf-8-sig')
+        st.download_button("⬇️ 조직별 종합 분석 CSV", csv2, "dept_comprehensive.csv", "text/csv", use_container_width=True)
 
 if __name__=="__main__":main()
